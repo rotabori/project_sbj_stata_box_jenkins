@@ -1,73 +1,72 @@
-*! version 0.1 20241017 Rodrigo Taborda
+*! version 0.2.0  26oct2026  Rodrigo Taborda
+*  0.1.0  17oct2024  first version: tsline + ac + pac combined
+*  0.2.0  26oct2026  if/in honored; ts operators in graph names; sub-option
+*                    design (tsopts/acopts/pacopts/combopts); lags/level;
+*                    temporary graph names with guaranteed cleanup
 
-program bj
+program define bj
+	version 18
 
-version 18
+	syntax varname(numeric ts) [if] [in] [,       ///
+		LAGs(numlist integer max=1 >0)            /// lags for ac and pac
+		LEVel(cilevel)                            /// confidence level
+		TItle(string asis)                        /// combined graph
+		SUBtitle(string asis)                     ///
+		NOTE(string asis)                         ///
+		CAPtion(string asis)                      ///
+		TSOPTs(string asis)                       /// options for tsline
+		ACOPTs(string asis)                       /// options for ac
+		PACOPTs(string asis)                      /// options for pac
+		COMBOPTs(string asis)                     /// options for graph combine
+		NAME(string asis)                         ///
+		SAVing(string asis)                       ///
+		]
 
-syntax varlist(max=1 numeric ts) [if] [in], ///
-        [TItle(string asis)]                     /// Title for the combined graph
-        [SUBtitle(passthru)]                  /// Subtitle for the combined graph
-        [XTitle(passthru)]                    /// X-axis title
-        [YTitle(passthru)]                    /// Y-axis title
-        [XLabel(passthru)]                    /// X-axis labels
-        [YLabel(passthru)]                    /// Y-axis labels
-        [NOTE(passthru)]                      /// Add a note to the combined graph
-        [CAPtion(passthru)]                   /// Add a caption to the combined graph
-        [REName(passthru)]                    /// Rename individual graphs
-        [TSLTitle(string)]                    /// Title for the tsline graph
-        [TSLSubtitle(string)]                 /// Subtitle for the tsline graph
-        [TSLNote(string)]                     /// Note for the tsline graph
-        [TSLCaption(string)]                  /// Caption for the tsline graph
-        [ACTitle(string)]                     /// Title for the ac graph
-        [ACSubtitle(string)]                  /// Subtitle for the ac graph
-        [ACNote(string)]                      /// Note for the ac graph
-        [ACCaption(string)]                   /// Caption for the ac graph
-        [PACTitle(string)]                    /// Title for the pac graph
-        [PACSubtitle(string)]                 /// Subtitle for the pac graph
-        [PACNote(string)]                     /// Note for the pac graph
-        [PACCaption(string)]                  /// Caption for the pac graph
-        [*]                                   /// Other graph options
+	* ---- sample and time-series checks ------------------------------------
+	quietly tsset                     // error 111 if data are not tsset
+	marksample touse
+	quietly count if `touse'
+	if r(N) == 0 error 2000
 
-marksample touse
+	* ---- build option strings ---------------------------------------------
+	if "`lags'" != "" local lagsopt lags(`lags')
 
-quietly count if `touse'
-    if `r(N)' == 0 {
-        error 2000
-        }
+	if `"`title'"' == "" local title `""Box-Jenkins: `varlist'""'
+	if `"`subtitle'"' != "" local subopt  subtitle(`subtitle')
+	if `"`note'"'     != "" local noteopt note(`note')
+	if `"`caption'"'  != "" local capopt  caption(`caption')
 
-    tsline `varlist', nodraw ///
-        title("`tsltitle'") subtitle("`tslsubtitle'") ///
-        note("`tslnote'") caption("`tslcaption'") ///
-        xtitle("") ///
-        `xtitle' `ytitle' `xlabel' `ylabel' `rename' `options' ///
-        name(tsline_`varlist', replace)
+	if `"`name'"' == "" {
+		local gname = strtoname("bj_`varlist'")   // D.y -> bj_D_y
+		local name `gname', replace
+	}
+	local nameopt name(`name')
+	if `"`saving'"' != "" local savopt saving(`saving')
 
-    ac `varlist', nodraw ///
-        title("`actitle'") subtitle("`acsubtitle'") ///
-        note("`acnote'") caption("`accaption'") ///
-        `xtitle' `ytitle' `xlabel' `ylabel' `rename' `options' ///
-        name(ac_`varlist', replace)
-        
-    pac `varlist', nodraw ///
-        title("`pactitle'") subtitle("`pacsubtitle'") ///
-        note("`pacnote'") caption("`paccaption'") ///
-        `xtitle' `ytitle' `xlabel' `ylabel' `rename' `options' ///
-        name(pac_`varlist', replace)
+	* ---- individual graphs, then combine ----------------------------------
+	tempname g_ts g_ac g_pac g_acpac
 
-    graph combine ac_`varlist' pac_`varlist', nodraw ///
-        rows(1) ///
-        name(ac_pac_`varlist', replace) ///
+	capture noisily {
+		tsline `varlist' if `touse', nodraw                   ///
+			xtitle("") `tsopts' name(`g_ts')
 
-    local bj_title = cond("`title'" != "", "`title'", "Box-Jenkins for `varlist'") ///
-    
-    graph combine tsline_`varlist' ac_pac_`varlist', ///
-        cols(1) ///
-        title("`bj_title'") ///
-        name(tsline_ac_pac_`varlist', replace) ///
+		ac `varlist' if `touse', nodraw                       ///
+			`lagsopt' level(`level') `acopts' name(`g_ac')
 
-    graph drop tsline_`varlist' ac_`varlist' pac_`varlist' ///
+		pac `varlist' if `touse', nodraw                      ///
+			`lagsopt' level(`level') `pacopts' name(`g_pac')
 
+		graph combine `g_ac' `g_pac', rows(1) nodraw name(`g_acpac')
+
+		graph combine `g_ts' `g_acpac', cols(1)               ///
+			title(`title') `subopt' `noteopt' `capopt'        ///
+			`combopts' `nameopt' `savopt'
+	}
+	local rc = _rc
+
+	* ---- always remove the intermediate graphs ----------------------------
+	foreach g in `g_ts' `g_ac' `g_pac' `g_acpac' {
+		capture graph drop `g'
+	}
+	exit `rc'
 end
-
-
-
